@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 .env
 data_lake/
-run/
+run/*
+!run/run_all.sh
 *.parquet
 *.gz
 *.sqlite
