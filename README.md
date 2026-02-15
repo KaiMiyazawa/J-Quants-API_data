@@ -1,65 +1,71 @@
-# J-Quants Premium Data Lake (V2 / jquants-api-client)
+# J-Quants Data Lake (Premium, V2)
 
-本リポジトリは、J-Quants API Premium で取得可能なデータセットを「バックフィル + 増分更新」し、
-データレイク（Bronze/Silver）として保存するための実行基盤です。
+J-Quants API V2（Premium）で取得可能なデータを、バックフィル + 増分で収集して
+ローカルデータレイクとして保存するプロジェクトです。
 
-公式Pythonクライアント `jquants-api-client` の `ClientV2` を使用します。
+- Bronze: APIレスポンス生データ（JSON Lines + gzip）
+- Bulk: Bulk APIファイル（Key名そのまま）
+- Resume-safe: 中断後の再実行で既存データをスキップ
 
-## 0. 前提
-- `.env` に `JQUANTS_API_KEY` を設定してください。
-- Premium のレート制御は上限500 req/minのため、デフォルトは480 req/minです（安全側）。
+## 参照ドキュメント
+- `CONTEXT.md`: 実装・運用・参照順序の統合コンテキスト
+- `DATA_LAKE_GUIDE.md`: 保存形式、命名規則、データセット対応
+- `PLAN.md`: 取得計画、定期実行周期、運用チェック
+- `docs/README.md`: 詳細設計資料の索引
 
-## 1. セットアップ（venv）
+## セットアップ
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-
+.venv/bin/pip install -r requirements.txt
 cp .env.example .env
-# .env を編集（JQUANTS_API_KEY など）
 ```
 
-## 2. 実行例
+`.env` で最低限 `JQUANTS_API_KEY` を設定してください。
 
-### 2.1 バックフィル（期間指定）
-
+## 主なスクリプト / コマンド
+1. 全体実行（推奨）
 ```bash
-python -m src.main backfill --from 2008-05-07 --to 2026-01-24
+run/run_all.sh <FROM_DATE> <TO_DATE> <INCREMENTAL_DATE>
 ```
-
-### 2.2 増分（単日）
-
-```bash
-python -m src.main incremental --date 2026-01-24
-```
-
-### 2.3 Bulk同期（可能なデータはCSVバルクで回収）
-
-```bash
-python -m src.main bulk-sync
-```
-
-### 2.4 Silver生成（Bronze → Parquet）
-
-```bash
-python -m src.main normalize --dataset eq_bars_daily --date 2026-01-24
-```
-
-## 3. 保存先（DATA_LAKE_ROOT）
-
-* Bronze（Raw）: jsonl.gz（1取得単位=1ファイル）
-* Silver（Normalized）: parquet（dtパーティション）
-
 例:
+```bash
+run/run_all.sh 2006-02-02 2026-02-14 2026-02-14
+```
+
+2. バックフィルのみ
+```bash
+.venv/bin/python -m src.main backfill --from 2006-02-02 --to 2026-02-14
+```
+
+3. 単日増分のみ
+```bash
+.venv/bin/python -m src.main incremental --date 2026-02-14
+```
+
+4. Bulk同期のみ
+```bash
+.venv/bin/python -m src.main bulk-sync
+```
+
+5. 完了チェック
+```bash
+sqlite3 run/checkpoints.sqlite "select status,count(*) from checkpoints group by status;"
+sqlite3 run/checkpoints.sqlite "select dataset,scope from checkpoints where status!='done';"
+```
+
+## 定期実行の目安（JST）
+1. 毎営業日 12:10: 当日分の取得（`incremental`）
+2. 毎営業日 20:00-23:00: 本処理（`incremental`）
+3. 毎営業日 夜: `bulk-sync`
+4. 毎営業日 夜: checkpoint監視
+
+詳細は `PLAN.md` の `2.1 推奨スケジュール（JST）` を参照。
+
+## 保存先（概要）
+```text
 DATA_LAKE_ROOT/
-bronze/dataset=eq_bars_daily/dt=2026-01-24/run_id=.../part-0000.jsonl.gz
-silver/dataset=eq_bars_daily/dt=2026-01-24/part-0000.parquet
-metadata/checkpoints.sqlite
-
-## 4. 重要な注意
-
-* `jquants-api-client` には `*_range` 系ユーティリティがあり、内部で複数リクエストを発行するため、
-  範囲が広い/連続実行ではレートリミット到達の可能性がある旨が README に記載されています。
-  本実装では、原則として自前のchunking + レート制御で取得します。
-# J-Quants-API_data
+  bronze/
+  bulk_raw/
+  metadata/
+```
