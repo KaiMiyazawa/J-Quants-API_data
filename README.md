@@ -69,3 +69,47 @@ DATA_LAKE_ROOT/
   bulk_raw/
   metadata/
 ```
+
+## Driveバックアップからの再開手順
+このリポジトリを再クローンした後でも、Driveに退避したアーカイブを展開すれば
+データと進捗（checkpoint）を引き継いで再開できます。
+
+1. リポジトリをクローン
+```bash
+git clone <YOUR_REPO_URL>
+cd J-Quants
+```
+
+2. Driveからアーカイブを配置して展開（リポジトリ直下で実行）
+```bash
+tar -xzf /path/to/jquants_backup_YYYYMMDD_HHMMSS.tar.gz
+```
+
+3. Python環境を作成
+```bash
+python -m venv .venv
+source .venv/bin/activate
+.venv/bin/pip install -r requirements.txt
+```
+
+4. `.env` を作成して API キーを設定
+```bash
+cp .env.example .env
+```
+`JQUANTS_API_KEY` を設定してください。
+
+5. 進捗引き継ぎの確認
+```bash
+sqlite3 run/checkpoints.sqlite "select status,count(*) from checkpoints group by status;"
+sqlite3 run/checkpoints.sqlite "select dataset,scope from checkpoints where status!='done';"
+```
+
+6. そのまま再開
+```bash
+.venv/bin/python -m src.main incremental --date $(date +%F)
+.venv/bin/python -m src.main bulk-sync
+```
+
+補足:
+- アーカイブには `data_lake/` と `run/checkpoints.sqlite` が含まれていれば十分です。
+- 同じ期間の `backfill` を再実行しても、既存データは自動スキップされます。
